@@ -1,52 +1,54 @@
-Implement the getFileContents function in app.js:
-
 const express = require('express');
-const app = express();
 const fs = require('fs');
+const path = require('path');
+const app = express();
 
-function getFileContents(filePath, startByte, endByte) {
-  // Implement this function
+// Define the getFileContents function
+function getFileContents(filePath, startByte, endByte, callback) {
+  const absPath = path.resolve(filePath);
+  const stream = fs.createReadStream(absPath, { start: startByte, end: endByte });
+  const chunks = [];
+
+  stream.on('data', (chunk) => {
+    chunks.push(chunk);
+  });
+
+  stream.on('error', (err) => {
+    callback(err, null);
+  });
+
+  stream.on('end', () => {
+    callback(null, Buffer.concat(chunks));
+  });
 }
 
+// Endpoint to serve file chunks
 app.get('/file', (req, res) => {
   const filePath = req.query.filePath;
-  const startByte = parseInt(req.query.startByte);
-  const endByte = parseInt(req.query.endByte);
+  const startByte = parseInt(req.query.startByte, 10);
+  const endByte = parseInt(req.query.endByte, 10);
 
-  const fileStats = fs.statSync(filePath);
-  const fileSize = fileStats.size;
-  const chunkSize = 1024 * 1024;
+  getFileContents(filePath, startByte, endByte, (err, data) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).send('Internal Server Error');
+    }
 
-  if (startByte >= fileSize || endByte < 0) {
-    res.status(416).end();
-    return;
-  }
+    const fileSize = fs.statSync(filePath).size;
+    const headers = {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': data.length,
+      'Content-Range': `bytes ${startByte}-${endByte}/${fileSize}`,
+      'Accept-Ranges': 'bytes'
+    };
 
-  const headers = {
-    'Content-Type': 'application/octet-stream',
-    'Content-Length': endByte - startByte + 1,
-    'Content-Range': `bytes ${startByte}-${endByte}/${fileSize}`,
-    'Accept-Ranges': 'bytes'
-  };
-
-  res.writeHead(206, headers);
-
-  const fileStream = fs.createReadStream(filePath, { start: startByte, end: endByte });
-
-  fileStream.on('error', (err) => {
-    res.status(500).end();
-    console.error(err);
-  });
-
-  fileStream.on('open', () => {
-    fileStream.pipe(res);
-  });
-
-  fileStream.on('end', () => {
-    res.end();
+    res.writeHead(206, headers);
+    res.end(data);
   });
 });
 
-app.listen(3000, () => {
-  console.log('Server listening on port 3000');
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
